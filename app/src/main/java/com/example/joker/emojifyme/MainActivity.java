@@ -6,10 +6,14 @@ import android.app.Application;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.design.widget.FloatingActionButton;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.content.FileProvider;
 import android.support.v4.content.PermissionChecker;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -20,14 +24,20 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.io.IOException;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQUEST_STORAGE_PERMISSION = 001;
     private static final int CAMERA_REQUEST = 100;
+    private static final String FILE_PROVIDER_AUTORITY = "com.example.android.fileprovider";
     private Button emojifyButton;
     private TextView titleTextView;
     private ImageView imageView;
     private FloatingActionButton clear, save, share;
+    private String tempPhotPath;
+    private Bitmap resultBitmap;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,8 +93,43 @@ public class MainActivity extends AppCompatActivity {
 
     private void launchCamera() {
 
-        Intent cameraIntent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
-        startActivityForResult(cameraIntent, CAMERA_REQUEST);
+        //create a camera intent
+        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+
+        //Ensure there is a camera activity to handle the intent
+        if(takePictureIntent.resolveActivity(getPackageManager())!=null){
+
+            //create a tempe file File where file should go
+            File photoFile = null;
+            try{
+                photoFile = BitmapUtils.createTempImageFile(this);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            if(photoFile!=null){
+
+                //get the path of the temporary file
+                tempPhotPath = photoFile.getAbsolutePath();
+
+                //get the content URI for the image file
+                Uri photoURI = FileProvider.getUriForFile(
+                        this,
+                        FILE_PROVIDER_AUTORITY,
+                        photoFile
+                );
+
+                //add the uri so the camera can store the image
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT,photoURI);
+
+                //launch the camera activity
+                startActivityForResult(takePictureIntent, CAMERA_REQUEST);
+
+
+            }
+
+        }
+
     }
 
 
@@ -94,22 +139,97 @@ public class MainActivity extends AppCompatActivity {
 
         Log.d("pivot","in onActivityResult");
         if (requestCode == CAMERA_REQUEST && resultCode==Activity.RESULT_OK) {
-            Bitmap bitmap = (Bitmap) data.getExtras().get("data");
-            if (bitmap != null) {
-                Log.d("pivot"," setting bitmap");
-                setImage(bitmap);
-            }
+            processAndSetImage();
+        }else{
+            BitmapUtils.deletImage(this,tempPhotPath);
         }
     }
 
-    private void setImage(Bitmap bitmap) {
+    private void processAndSetImage() {
 
         titleTextView.setVisibility(View.GONE);
         emojifyButton.setVisibility(View.GONE);
-        imageView.setImageBitmap(bitmap);
         save.setVisibility(View.VISIBLE);
-        share.setVisibility(View.VISIBLE);
         clear.setVisibility(View.VISIBLE);
+        share.setVisibility(View.VISIBLE);
 
+        resultBitmap = BitmapUtils.rescaleBitmap(MainActivity.this,tempPhotPath);
+        imageView.setImageBitmap(resultBitmap);
+
+    }
+
+
+    //on save btn clicked
+    public void saveMe(View view) {
+        new AsyncSave().execute();
+    }
+
+    //on share btn clicked
+    public void shareMe(View view) {
+        new AsyncShare().execute();
+    }
+
+    //on clear btn clicked
+    public void clear(View view) {
+
+         new AsyncClear().execute();
+
+    }
+
+    //async Share
+    private class AsyncShare extends AsyncTask<Void,Void,Void>{
+
+        @Override
+        protected Void doInBackground(Void... params) {
+
+            BitmapUtils.deletImage(MainActivity.this,tempPhotPath);
+
+            String imagePath = BitmapUtils.saveImage(MainActivity.this,resultBitmap);
+
+            BitmapUtils.shareImage(MainActivity.this,imagePath);
+
+            return null;
+        }
+    }
+
+
+    //async Save
+    private class AsyncSave extends AsyncTask<Void,Void,Void>{
+
+        @Override
+        protected Void doInBackground(Void... params) {
+
+            //delete temp file
+            BitmapUtils.deletImage(MainActivity.this,tempPhotPath);
+
+            //save the file as permanent
+            BitmapUtils.saveImage(MainActivity.this,resultBitmap);
+
+            return null;
+        }
+    }
+
+    //async Clear
+    private class AsyncClear extends AsyncTask<Void,Void,Void>{
+
+        @Override
+        protected Void doInBackground(Void... params) {
+
+            BitmapUtils.deletImage(MainActivity.this,tempPhotPath);
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Void aVoid) {
+            super.onPostExecute(aVoid);
+
+            titleTextView.setVisibility(View.VISIBLE);
+            emojifyButton.setVisibility(View.VISIBLE);
+            save.setVisibility(View.GONE);
+            clear.setVisibility(View.GONE);
+            share.setVisibility(View.GONE);
+            imageView.setImageResource(0);
+
+        }
     }
 }
